@@ -1,0 +1,26 @@
+#!/bin/bash
+
+
+
+# 1. Define colors and styles completely in shell memory (TrueColor 24-bit)
+# Text color: Crimson (#DC143C) -> 220;20;60
+# Background color: Deep Charcoal (#1A1A1A) -> 26;26;26
+# Styles: Regular (0), Bold + Italic (1;3)
+
+# Base sentence style: Regular text, Crimson FG, Deep Charcoal BG
+BASE_STYLE=$(printf '\033[0;38;2;220;20;60;48;2;26;26;26m')
+
+# Special word style: Bold + Italic text, Crimson FG, Deep Charcoal BG
+SPECIAL_STYLE=$(printf '\033[1;3;38;2;220;20;60;48;2;26;26;26m')
+
+# Reset sequence to stop styling the rest of the terminal line
+RESET=$(printf '\033[0m')
+
+# 2. Print the sentence using the styled segments
+printf "%s  %s%sWelcome to my handy scripts  %s%s %s\n" \
+    "$BASE_STYLE" \
+    "$RESET" "$SPECIAL_STYLE" "$RESET" "$BASE_STYLE" \
+    "$RESET"
+read -p "Press any key to continue."
+tree -L 2
+echo "Have fun!"

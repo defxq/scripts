@@ -1,0 +1,236 @@
+#!/bin/sh
+
+# Check if git is NOT installed
+if ! command -v git >/dev/null 2>&1; then
+    printf "Error: git is not installed.\n" >&2
+    printf "Please install git first and try again.\n" >&2
+    exit 1
+fi
+
+# Define the config file path (Saves to ~/.git_profile_backup)
+PROFILE_FILE="$HOME/.git_profile_backup"
+
+printf "\n====== Git Config Menu ======\n"
+echo "1) Load saved profile"
+echo "2) Setup now"
+echo "-----------------------------"
+
+while true; do
+    printf "Select an option (1-2): "
+    old_stty=$(stty -g)
+    stty raw -echo isig
+    menu_choice=$(dd bs=1 count=1 2>/dev/null)
+    stty "$old_stty"
+    echo "" # Clean newline
+
+    case "$menu_choice" in
+        1)
+            if [ ! -f "$PROFILE_FILE" ]; then
+                printf "Error: No saved profile found at %s\n" "$PROFILE_FILE" >&2
+                printf "Please choose 'Setup now' to create one.\n\n"
+                continue
+            fi
+            
+            # Read variables safely from the saved file
+            . "$PROFILE_FILE"
+            
+            if [ -z "$user_name" ] || [ -z "$user_email" ]; then
+                printf "Error: Profile file is corrupted or empty.\n\n" >&2
+                continue
+            fi
+
+            printf "\n--> Loaded profile successfully!\n"
+            printf "Name: %s\n" "$user_name"
+            printf "Email: %s\n" "$user_email"
+            if [ -n "$CHOSEN_EDITOR" ]; then
+                printf "Editor: %s\n" "$CHOSEN_EDITOR"
+            fi
+            
+            # Skip manual setup inputs and go straight to applying the configs
+            LOADED_FROM_PROFILE=1
+            break
+            ;;
+        2)
+            LOADED_FROM_PROFILE=0
+            break
+            ;;
+        *)
+            echo "Invalid option. Please press 1 or 2."
+            ;;
+    esac
+done
+
+# Only run input prompts if they selected "Setup now"
+if [ "$LOADED_FROM_PROFILE" -eq 0 ]; then
+    printf "\n======Global Config Setup======\n"
+
+    printf "Name(Required): "
+    read -r user_name
+    printf "Email(Required): "
+    read -r user_email
+
+    # POSIX compatible read -n 1 equivalent using stty (keeping isig enabled for Ctrl+C)
+    printf "Select Text Editor? [y]es | No (Default): "
+    old_stty=$(stty -g)
+    stty raw -echo isig
+    t=$(dd bs=1 count=1 2>/dev/null)
+    stty "$old_stty"
+    echo "" # Clean newline
+
+    CHOSEN_EDITOR=""
+
+    case "$t" in
+        y|Y)
+            echo "Detecting available editors..."
+            EDITORS="code nvim vi vim nano hx helix emacs micro gedit subl"
+            INSTALLED_EDITORS=""
+            COUNTER=1
+
+            # Loop through and filter out what is actually installed
+            for ed in $EDITORS; do
+                if command -v "$ed" >/dev/null 2>&1; then
+                    INSTALLED_EDITORS="$INSTALLED_EDITORS$ed "
+                fi
+            done
+
+            echo ""
+            echo "Available editors found:"
+            echo "--------------------------------"
+
+            # Display the menu options using standard POSIX loops
+            for ed in $INSTALLED_EDITORS; do
+                echo "$COUNTER) $ed"
+                COUNTER=$((COUNTER + 1))
+            done
+            echo "$COUNTER) Custom (Type your own)"
+            echo "--------------------------------"
+
+            # Loop until a valid selection is made
+            while true; do
+                echo ""
+                printf "Select an editor by number: "
+
+                # Read single character safely while allowing Ctrl+C
+                old_stty=$(stty -g)
+                stty raw -echo isig
+                choice=$(dd bs=1 count=1 2>/dev/null)
+                stty "$old_stty"
+                echo "" # Clean newline
+
+                # 1. SKIP immediately if the user hits Enter (nothing) or types a space
+                case "$choice" in
+                    ""|[[:space:]])
+                        echo "No selection made. Skipping editor setup."
+                        break
+                        ;;
+                esac
+
+                # 2. Check if the input is a valid number using pure shell built-ins
+                case "$choice" in
+                    *[!0-9]*)
+                        echo "Invalid choice. Please pick a number from the menu."
+                        continue
+                        ;;
+                esac
+
+                # 3. Check if they selected the "Custom" option
+                if [ "$choice" -eq "$COUNTER" ]; then
+                    printf "Type the name/path of your custom editor: "
+                    read -r CUSTOM_EDITOR
+
+                    case "$CUSTOM_EDITOR" in
+                        ""|[[:space:]]*)
+                            echo "No custom path entered. Skipping editor setup."
+                            break
+                            ;;
+                    esac
+                    CHOSEN_EDITOR="$CUSTOM_EDITOR"
+                    break
+                fi
+
+                # 4. Match the number back to the installed list
+                CURRENT_INDEX=1
+                MATCHFOUND=0
+                for ed in $INSTALLED_EDITORS; do
+                    if [ "$choice" -eq "$CURRENT_INDEX" ]; then
+                        CHOSEN_EDITOR="$ed"
+                        MATCHFOUND=1
+                        break
+                    fi
+                    CURRENT_INDEX=$((CURRENT_INDEX + 1))
+                done
+
+                # Correctly break out of the while loop if matched
+                if [ "$MATCHFOUND" -eq 1 ]; then
+                    break
+                fi
+
+                # 5. If the number was out of range, show invalid message
+                echo "Invalid choice. Please pick a number from the menu."
+            done
+
+            # Only display confirmation if an editor was actually set
+            if [ -n "$CHOSEN_EDITOR" ]; then
+                echo "--------------------------------"
+                echo "You selected: $CHOSEN_EDITOR"
+            fi
+            ;;
+        n|N|"")
+            echo "Skipping editor selection."
+            ;;
+        *)
+            echo "Invalid input. Skipping editor selection."
+            ;;
+    esac
+fi
+
+echo ""
+printf "Save/Apply changes? (y/N): "
+read -r response
+
+# Standard POSIX case to handle upper/lowercase response
+case "$response" in
+    [yY]|[yY][eE][sS])
+        # --- Validate Name (Cannot be empty or just spaces) ---
+        case "$user_name" in
+            ""|[[:space:]]*)
+                printf "Error: Name cannot be empty.\n" >&2
+                exit 1
+                ;;
+        esac
+
+        # --- Validate Email (Cannot be empty or just spaces) ---
+        case "$user_email" in
+            ""|[[:space:]]*)
+                printf "Error: Email cannot be empty.\n" >&2
+                exit 1
+                ;;
+        esac
+
+        # --- Apply Git Configs ---
+        git config --global user.name "$user_name"
+        git config --global user.email "$user_email"
+
+        # Only sets the core.editor if an editor was actually chosen
+        if [ -n "$CHOSEN_EDITOR" ]; then
+            git config --global core.editor "$CHOSEN_EDITOR"
+        fi
+
+        git config --global init.defaultBranch main
+
+        # --- Save Profile to Backup File ---
+        # This writes the current configuration out so it can be loaded next time
+        printf "user_name=\"%s\"\nuser_email=\"%s\"\nCHOSEN_EDITOR=\"%s\"\n" \
+            "$user_name" "$user_email" "$CHOSEN_EDITOR" > "$PROFILE_FILE"
+
+        printf "\n--> Profile saved to %s\n" "$PROFILE_FILE"
+
+        printf "\n======Global Config List======\n"
+        git config --global --list
+        ;;
+    *)
+        printf "Cancelled.\n"
+        exit 0
+        ;;
+esac
+
